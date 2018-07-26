@@ -5,6 +5,17 @@ etlmetadata.sql是数据库etl元数据信息
 
 startEtl.sh启动
 
+每一次启动一次start,将增加一条exe_batch_info信息
+
+支持单表和多个分表，
+单表：
+user 
+
+多个分表：
+user_00
+user_01
+user_02
+
 
 DROP TABLE IF EXISTS `app_config`;
 CREATE TABLE `app_config` (
