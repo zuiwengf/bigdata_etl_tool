@@ -1,6 +1,8 @@
 # bigdata_etl_tool
 从大量的不同的数据库不同表中，抽取数据到ods层。让你从大量配置askaba或oozie中解放出来，只需要简单配置下数据库。
 etlmetadata.sql是数据库etl元数据信息
+
+
 startEtl.sh启动
 
 
