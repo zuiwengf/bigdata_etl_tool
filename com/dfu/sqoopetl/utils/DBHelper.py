@@ -13,6 +13,7 @@ import re
 import  subprocess
 import sys
 import traceback
+import logging
 
 from DBUtils.PooledDB import PooledDB
 import MySQLdb
@@ -48,7 +49,7 @@ class DBHelper(object):
             if cursor is not None:
                 cursor.close()
         except Exception as e:
-            print('DBHelper query sql fail! sql ： %s   , reason %s ' % (sql,str(e)))
+            logging.error('DBHelper query sql fail! sql ： %s   , reason %s ' % (sql,str(e)))
             traceback.print_exc()
         finally:
             if conn is not None:
@@ -79,7 +80,7 @@ class DBHelper(object):
             return 1
     
         except Exception as e:
-            print('DBHelper insert sql fail! sql ： %s   , reason %s ' % (sql,str(e)))
+            logging.error('DBHelper insert sql fail! sql ： %s   , reason %s ' % (sql,str(e)))
             traceback.print_exc()
             return 0
         
@@ -109,7 +110,7 @@ class DBHelper(object):
             return 1
     
         except Exception as e:
-            print('DBHelper update sql fail! sql ： %s   , reason %s ' % (sql,str(e)))
+            logging.error('DBHelper update sql fail! sql ： %s   , reason %s ' % (sql,str(e)))
             traceback.print_exc()
             return 0
         

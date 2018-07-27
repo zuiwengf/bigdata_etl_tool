@@ -2,30 +2,31 @@
 #-*- encoding: utf-8 -*-
 '''
 Created on 2018年7月17日
-@author: zuiweng.df
+@author: zuiweng
 @summary: 使用sqoop etl工具
 '''
-
-import ConfigParser
-import datetime
-import os
-import re
-import traceback
-import sys
-import time
-import subprocess
-import random
-import logging
-from optparse import OptionParser
-
-
-from com.xcom.dfupetl.model.DBTableInfo import ETLTable
-from com.xcom.dfupetl.model.EtlMetadata import EtlDB, EtlTableTemplate, AppInfo
-from com.xcom.dfupetl.utils.DBHelper import DBHelper
 
 '''
 sqoop表导入hive的工具
 '''
+
+import ConfigParser
+import datetime
+import logging
+from optparse import OptionParser
+import os
+import random
+import re
+import subprocess
+import sys
+import time
+import traceback
+
+from com.dfu.sqoopetl.model.DBTableInfo import ETLTable
+from com.dfu.sqoopetl.model.EtlMetadata import EtlDB, EtlTableTemplate, AppInfo
+from com.dfu.sqoopetl.utils.DBHelper import DBHelper
+
+
 class SqoopEtlTool(object):
     
     '''
@@ -51,78 +52,101 @@ class SqoopEtlTool(object):
         
                 tempTableNameList=[baseTableName,baseTableName+"_daily_incr"]
                 for tableName in tempTableNameList:
-                    self.system(r''' hive -e  "  drop table IF  EXISTS  %s  " ''' % tableName,0) 
+                    self.system(r''' hive -e  "  drop table IF  EXISTS  %s  " ''' % tableName,None,0) 
             
         
         #遍历循环所有的表
-        ####ETLTable
-        for tableInfo in self.realEtlTableList:
-#                 dbName=tableInfo.dbName
-#                 print dbName
-                #如果是全量导入则创建表
-                if  tableInfo.createTable==1 :
+        ####  EtlTableTemplate
+        for k,tableTemplate in self.tableTemplateDict.items():
+                #如果是全量导入则创建表 EtlTableTemplate
+                if  tableTemplate.createTable==1 :
                     try:
-                        self.exeCreateTable(tableInfo)
+                        self.exeCreateTable(tableTemplate)
                     except Exception as e:
                         logging.error(r'exeCreateTable 出现问题: '+str(e))
                         traceback.print_exc()
-                
-                #全量导入数据
-                if  tableInfo.etlAllData==1 : 
+                        
+                    currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
+                    os.system("rm -rf  %s/*.java" % currentPath)
+                        
+        #全量导入数据    ETLTable              
+        for tableInfo in self.realEtlTableList:
+            #如果需要全部导入
+            if  tableInfo.etlAllData==1 :
+                #如果是多个分表
+                if  tableInfo.isMutTable==1:
+                    rr=re.match(r"(.*?)_(\d+)",tableInfo.realTableName, re.M|re.I)
                     try:
-                        self.extractAllData(tableInfo)
+                        self.extractAllData(tableInfo,False)
                     except Exception as e:
                         logging.error(r'exeSqoop 出现问题: '+str(e))
                         traceback.print_exc()
+                else:
+                    try:
+                        self.extractAllData(tableInfo,True)
+                    except Exception as e:
+                        logging.error(r'exeSqoop 出现问题: '+str(e))
+                        traceback.print_exc()
+                
+                currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
+                os.system("rm -rf  %s/*.java" % currentPath) 
                     
+
+        #增量导入到临时表              ETLTable  
+        for tableInfo in self.realEtlTableList:
+            if tableInfo.etlIncreamData==1:
                 incrementCol=tableInfo.incrementCol
                 useTimeInc=True
                 if incrementCol is not None :
                     index=incrementCol.lower().find("id")
                     if index >= 0:
                         useTimeInc=False
-                        
-                if tableInfo.etlIncreamData==1:
-                    if useTimeInc:
-                        try:
-                            self.extractIncrementData(tableInfo)
-                            self.mergeTempData2RealTable(tableInfo)
-                        except Exception as e:
-                            logging.error(r'extractIncrementData or mergeTempData2RealTable 出现问题: '+str(e))
-                            traceback.print_exc()
-                    else:
-                        self.insertEtlRes(tableInfo,1,0) 
-                        
+                    
+                #如果时间增加列
+                if useTimeInc:
+                    try:
+                        self.extractIncrementData(tableInfo)
+                    except Exception as e:
+                        logging.error(r'extractIncrementData or mergeTempData2RealTable 出现问题: '+str(e))
+                        traceback.print_exc()
+                else:
+                    pass
+                
                 
                 currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
-                os.system("rm -rf  %s/*.java" % currentPath)
+                os.system("rm -rf  %s/*.java" % currentPath) 
+
+        #从临时表导入到总表            ，不能和上一段合并代码
+        for tableInfo in self.realEtlTableList:
+            if tableInfo.etlIncreamData==1:
+                try:
+                    self.mergeTempData2RealTable(tableInfo)
+                except Exception as e:
+                    logging.error(r' mergeTempData2RealTable 出现问题: '+str(e))
+                    traceback.print_exc()
+            currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
+            os.system("rm -rf  %s/*.java" % currentPath)              
                 
-        for keyName,tempTableInfo in self.splitTableDict.items():
-            if tempTableInfo  is not None:
-                targetDBName="ods_"+tempTableInfo.dbName+"."
-                pkeyName=tempTableInfo.pkeyName
-                increaseDataTable=targetDBName+tableInfo.targetTableName+"_daily_incr"
-                allDataTable=targetDBName+tableInfo.targetTableName
-                hiveTableDict={
-                   "allDataTable":allDataTable,
-                   "increaseDataTable":increaseDataTable,
-                   "pkeyName":pkeyName
-                }
-                hiveCmd=r'''hive -e " insert overwrite    table {0[allDataTable]}    select * from ( select a.* from {0[allDataTable]} as a where a.{0[pkeyName]}  not in ( select  {0[pkeyName]} from {0[increaseDataTable]} union all select b.* from {0[increaseDataTable]} as b  ) tmp "  '''.format(hiveTableDict)
-                logging.info( r"startEtl: hiveCmd %s" %  hiveCmd)
-                self.system(hiveCmd)   
-                self.insertEtlRes(tableInfo,3,0)      
+                
+                
+        currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
+        os.system("rm -rf  %s/*.java" % currentPath)      
                    
                     
 
-    def system(self,cmd,sleepTime=1):
+    def system(self,cmd,tableInfo,sleepTime=1):
 #         time.sleep(1)
         logging.warn(r"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 执行如下命令： ")
         logging.info(cmd)
         if sleepTime >0:
             time.sleep(sleepTime)
             
+        startTime=datetime.datetime.now() 
         os.system(cmd)
+        endTime=datetime.datetime.now()
+        
+        if  tableInfo  is not None:
+            self.insertEtlRes(tableInfo,0,0,startTime,endTime,cmd) 
 #         cmdOut = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 #         while True:
 #             line = cmdOut.stdout.readline()
@@ -130,44 +154,24 @@ class SqoopEtlTool(object):
 #             if subprocess.Popen.poll(cmdOut)==0:
 #                 break 
                 
-                
+    '''
+    从临时表到总表合并
+    '''            
     def mergeTempData2RealTable(self,tableInfo):
         ####ETLTable
         targetDBName="ods_"+tableInfo.dbName+"."
         allDataTable=targetDBName+tableInfo.targetTableName
-        
-        
         pkeyName=tableInfo.pkeyName
-                
         
-        hiveCmd=""
-        #如果是多表则等所有的分表来导入到临时表之后，再导入真实表
-        if tableInfo.isMutTable ==1 :
-            keyName=allDataTable+":"+pkeyName
-            self.splitTableDict[keyName]=tableInfo
-            
-            allDataTable=targetDBName+tableInfo.targetTableName+"_daily_incr"
-            increaseDataTable=targetDBName+tableInfo.realTableName
-            hiveTableDict={
-               "allDataTable":allDataTable,
-               "increaseDataTable":increaseDataTable,
-               "pkeyName":pkeyName
-            }
-            hiveCmd=r'''hive -e " insert into    table {0[allDataTable]}    select * from ( select a.* from {0[allDataTable]} as a where a.{0[pkeyName]}  not in ( select  {0[pkeyName]} from {0[increaseDataTable]} ) union all select b.* from {0[increaseDataTable]} as b  ) tmp " '''.format(hiveTableDict)
-        else:
-            #单表则直接orverwrite
-            increaseDataTable=targetDBName+tableInfo.targetTableName+"_daily_incr"
-            hiveTableDict={
-               "allDataTable":allDataTable,
-               "increaseDataTable":increaseDataTable,
-               "pkeyName":pkeyName
-            }
-            hiveCmd=r'''hive -e " insert overwrite    table {0[allDataTable]}    select * from ( select a.* from {0[allDataTable]} as a where a.{0[pkeyName]}  not in ( select  {0[pkeyName]} from {0[increaseDataTable]} ) union all select b.* from {0[increaseDataTable]} as b  ) tmp " '''.format(hiveTableDict)
-          
-        logging.info( r"mergeTempData2RealTable: hiveCmd %s" %  hiveCmd)
-        self.system(hiveCmd)
-        self.insertEtlRes(tableInfo,1,0) 
-        
+        increaseDataTable=targetDBName+tableInfo.targetTableName+"_daily_incr"
+        hiveTableDict={
+           "allDataTable":allDataTable,
+           "increaseDataTable":increaseDataTable,
+           "pkeyName":pkeyName
+        }
+        hiveCmd=r'''hive -e " insert overwrite    table {0[allDataTable]}    select * from ( select a.* from {0[allDataTable]} as a where a.{0[pkeyName]}  not in ( select  {0[pkeyName]} from {0[increaseDataTable]} ) union all select b.* from {0[increaseDataTable]} as b  ) tmp " '''.format(hiveTableDict)
+        logging.info( r" mergeTempData2RealTable: hiveCmd %s" %  hiveCmd)
+    
         
         
         
@@ -175,11 +179,19 @@ class SqoopEtlTool(object):
     '''
          向数据库中插入每一个etl table的记录
     '''
-    def insertEtlRes(self,tableInfo,type,status):
-        sourceTableName=tableInfo.realTableName
-        targetTableName=tableInfo.targetTableName
+    def insertEtlRes(self,tableInfo,type,status,startTime,endTime,cmd):
+        if isinstance(tableInfo, ETLTable):
+            sourceTableName=tableInfo.realTableName
+            targetTableName=tableInfo.targetTableName
+            
+        else :
+            sourceTableName=tableInfo.tableName
+            targetTableName=tableInfo.tableName
+        
+        
         sourceDBName=tableInfo.dbName
         targetDBName="ods_"+tableInfo.dbName
+        useTime=(endTime-startTime).seconds
         
         dataDict={
             "sourceTableName":sourceTableName,
@@ -188,7 +200,11 @@ class SqoopEtlTool(object):
             "targetDBName":targetDBName,
             "type":type,
             "batchNum":self.batchNumIn,
-            "status":status
+            "status":status,
+            "startTime":startTime,
+            "endTime":endTime,
+            "useTime":useTime,
+            "cmd":cmd
             }
         
         DBHelper.insert(self.configDBInfo,"table_exe_info",dataDict);
@@ -196,15 +212,19 @@ class SqoopEtlTool(object):
     '''
     创建hive表
     '''
-    def exeCreateTable(self,tableInfo):
-        ####ETLTable
-        dbName=tableInfo.dbName
+    def exeCreateTable(self,etlTableTemplate):
+        ####EtlTableTemplate
+        dbName=etlTableTemplate.dbName
         dbInfo=self.dbDict.get(dbName)
-        sql="desc %s " % tableInfo.realTableName
+        if etlTableTemplate.isMutTable==1:
+            sql="desc %s%s" % (etlTableTemplate.tableName,etlTableTemplate.tableSubName)
+        else:
+            sql="desc %s " % etlTableTemplate.tableName
+        
         fetchResult=DBHelper.query(dbInfo,sql);
         rowcount=fetchResult[0]
         queryResult=fetchResult[1]
-        baseTableName="ods_"+dbName+"."+tableInfo.targetTableName
+        baseTableName="ods_"+dbName+"."+etlTableTemplate.tableName
 
         tempTableNameList=[baseTableName,baseTableName+"_daily_incr"]
 
@@ -251,8 +271,7 @@ class SqoopEtlTool(object):
                 createTableStr=createTableStr+r''' ) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'  STORED AS TEXTFILE "   '''
                 logging.info( r"exeCreateTable: %s" % createTableStr)
                 
-                self.system(createTableStr)
-                self.insertEtlRes(tableInfo,1,0) 
+                self.system(createTableStr,etlTableTemplate)
         
         
         
@@ -260,13 +279,10 @@ class SqoopEtlTool(object):
     '''
             全量导入数据
     '''
-    def extractAllData(self,tableInfo):
+    def extractAllData(self,tableInfo,isOverWrite):
         dbName=tableInfo.dbName
         dbInfo=self.dbDict.get(dbName)
         connStr=dbInfo.toConnString()
-        
-        self.insertEtlRes(tableInfo,2,0) 
-        
         targetDir=self.appInfo.namenodeUrl+"/user/hive/tmp/warehouse/ods_"+dbName+".db/"+tableInfo.realTableName
         hadoopDbDict={
                "targetDir":targetDir
@@ -274,13 +290,7 @@ class SqoopEtlTool(object):
         
         hdfsCmd=r'''hadoop  dfs -rm -r {0[targetDir]}  '''.format(hadoopDbDict)
         logging.info( r"extractAllData: hdfsCmd %s" %  hdfsCmd)
-        self.system(hdfsCmd)
-#         logFile=self.currPath+"/"+tableInfo.realTableName+"-hdfsCmd.txt"
-#         fhandle = open(logFile, "w")  
-#         subprocess.Popen(hdfsCmd, shell=True, stdout=fhandle).stdout  
-#         fhandle.close()
-        
-        
+        self.system(hdfsCmd,tableInfo)
         
         
         sqoopDbDict={
@@ -291,31 +301,31 @@ class SqoopEtlTool(object):
                "mapperCount":tableInfo.mapperCount,
                "targetDir":targetDir,
                "pkeyName":tableInfo.pkeyName
-            }
+        }
         
         sqoopCmd=r''' sqoop import    --connect {0[mysqlConn]}      --table {0[tableName]}    --username {0[username]}     --password {0[password]}  --split-by {0[pkeyName]}  --hive-drop-import-delims --null-string '\\N'     --null-non-string '\\N'   --target-dir {0[targetDir]}    --fields-terminated-by  '\t'     --lines-terminated-by '\n'  '''.format(sqoopDbDict)
         logging.info( r"extractAllData: sqoopCmd %s" %  sqoopCmd)
-        self.system(sqoopCmd)
-#         logFile=self.currPath+"/"+tableInfo.realTableName+"-sqoop.txt"
-#         fhandle = open(logFile, "w")  
-#         subprocess.Popen(sqoopCmd, shell=True, stdout=fhandle).stdout  
-#         fhandle.close()
-        
+        self.system(sqoopCmd,tableInfo)
         
         tableName="ods_"+dbName+"."+tableInfo.targetTableName
         targetDir=self.appInfo.namenodeUrl+"/user/hive/tmp/warehouse/ods_"+dbName+".db/"+tableInfo.realTableName
+
+        
+        overWriteStr=" "
+        if tableInfo.isMutTable==1:
+            overWriteStr="  "
+        else:
+            overWriteStr=" overwrite "
         hiveDBDict={
                "tableName":tableName,
-               "targetDir":targetDir
+               "targetDir":targetDir,
+               "overWriteStr":overWriteStr
         }
+            
         
-        loadDataCmd=r''' hive -e "load data inpath '{0[targetDir]}' overwrite  into table {0[tableName]}  "   '''.format(hiveDBDict)
-        logging.info( r"extractAllData: loadDataCmd %s" %  loadDataCmd)
-        self.system(loadDataCmd)
-#         logFile=self.currPath+"/"+tableName+"-hive.txt"
-#         fhandle = open(logFile, "w")  
-#         subprocess.Popen(sqoopCmd, shell=True, stdout=fhandle).stdout  
-#         fhandle.close() 
+        loadDataCmd=r''' hive -e "load data inpath '{0[targetDir]}' {0[overWriteStr]} into table {0[tableName]}  "   '''.format(hiveDBDict)
+        logging.info( r"所有表第一次初始化所有数据  extractAllData: loadDataCmd %s" %  loadDataCmd)
+        self.system(loadDataCmd,tableInfo)
           
 
     
@@ -326,17 +336,16 @@ class SqoopEtlTool(object):
         dbName=tableInfo.dbName
         dbInfo=self.dbDict.get(dbName)
         connStr=dbInfo.toConnString()
+        incrementTableName=tableInfo.realTableName+"_daily_incr"
         
-        targetTableName=tableInfo.realTableName+"_daily_incr"
-        
-        targetDir=self.appInfo.namenodeUrl+"/user/hive/tmp/warehouse/ods_"+dbName+".db/"+targetTableName
+        targetDir=self.appInfo.namenodeUrl+"/user/hive/tmp/warehouse/ods_"+dbName+".db/"+incrementTableName
         hadoopDbDict={
                "targetDir":targetDir
         }
         
         hdfsCmd=r'''hadoop  dfs -rm -r {0[targetDir]}  '''.format(hadoopDbDict)
         logging.info( r"extractIncrementData: hdfsCmd %s" %  hdfsCmd)
-        self.system(hdfsCmd)
+        self.system(hdfsCmd,tableInfo)
         
         
         now = datetime.datetime.now()
@@ -346,7 +355,7 @@ class SqoopEtlTool(object):
         ####ETLTable
         whereSQL=" "
         
-        #只支持时间啊，其他必错无疑
+        #只支持时间啊，其他必错无疑  导入到临时表
         if tableInfo.incrementType==1 :
             whereDict={
                    "incrementCol":tableInfo.incrementCol,
@@ -368,20 +377,18 @@ class SqoopEtlTool(object):
         
         sqoopImportCmd=r''' sqoop import --connect {0[mysqlConn]} --username  {0[username]} --password {0[password]} --split-by {0[pkeyName]} --query 'select * from {0[tableName]}    {0[whereSQL]}'  --hive-drop-import-delims --null-string '\\N' --null-non-string '\\N' --target-dir {0[targetDir]}    --fields-terminated-by  '\t'     --lines-terminated-by '\n'  '''.format(sqoopDbDict)
         logging.info( r"extractIncrementData: sqoopImportCmd %s" %  sqoopImportCmd)
-        self.system(sqoopImportCmd)
+        self.system(sqoopImportCmd,tableInfo)
         
-        targetTableName=tableInfo.targetTableName+"_daily_incr"
-        tableName="ods_"+dbName+"."+targetTableName
-        targetDir=self.appInfo.namenodeUrl+"/user/hive/tmp/warehouse/ods_"+dbName+".db/"+tableInfo.realTableName
+        incrementTableName="ods_"+dbName+"."+tableInfo.targetTableName+"_daily_incr"
         hiveDBDict={
-               "tableName":tableName,
+               "incrementTableName":incrementTableName,
                "targetDir":targetDir
         }
         
-        loadDataHiveCmd=r''' hive -e " load data inpath '{0[targetDir]}'   into table {0[tableName]}  "   '''.format(hiveDBDict)
+        loadDataHiveCmd=r''' hive -e " load data inpath '{0[targetDir]}'   into table {0[incrementTableName]}  "   '''.format(hiveDBDict)
         logging.info( r"extractIncrementData: loadDataHiveCmd %s" %  loadDataHiveCmd)
-        self.system(loadDataHiveCmd)
-        self.insertEtlRes(tableInfo,2,0) 
+        self.system(loadDataHiveCmd,tableInfo)
+        
           
         
         
@@ -476,7 +483,8 @@ class SqoopEtlTool(object):
                     
         
         sql='''select a.id, a.tableName, a.isMutTable, a.mergeCol, a.incrementCol, 
-        a.createTable, a.etlAllData, a.torder, a.mapperCount,a.pkeyName,a.incrementType,a.etlIncreamData,   b.dbName
+        a.createTable, a.etlAllData, a.torder, a.mapperCount,a.pkeyName,a.incrementType,a.etlIncreamData, 
+        a.tableSubName,  b.dbName
                from etl_table_template  a  left join etl_db b 
                on a.dbId=b.id  where a.enable=1  
                order by a.torder desc , b.torder desc 
@@ -501,10 +509,11 @@ class SqoopEtlTool(object):
                     pkeyName=dbrow[9]
                     incrementType=dbrow[10]
                     etlIncreamData=int(dbrow[11])
-                    dbName=dbrow[12]
+                    tableSubName=dbrow[12]
+                    dbName=dbrow[13]
                     self.tableTemplateNameList.append(tableName)
                     
-                    tempTable=EtlTableTemplate(ids,tableName,dbName,isMutTable,mergeCol,incrementCol,createTable,etlAllData,torder,pkeyName,incrementType,etlIncreamData,mapperCount)
+                    tempTable=EtlTableTemplate(ids,tableName,dbName,isMutTable,mergeCol,incrementCol,createTable,etlAllData,torder,pkeyName,incrementType,etlIncreamData,tableSubName,mapperCount)
                     self.tableTemplateDict[tableName]=tempTable
                     
         

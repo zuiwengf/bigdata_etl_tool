@@ -32,7 +32,7 @@ class EtlDB:
 class EtlTableTemplate:
     
     def __init__(self,sid,tableName,dbName,isMutTable,mergeCol,incrementCol,createTable,etlAllData,torder,pkeyName,incrementType,etlIncreamData,
-                 mapperCount=1,enable=1,gmt_modify=None,gmt_create=None):
+                 tableSubName,mapperCount=1,enable=1,gmt_modify=None,gmt_create=None):
         self.sid=sid;
         self.tableName=tableName
         self.dbName=dbName
@@ -49,6 +49,7 @@ class EtlTableTemplate:
         self.gmt_create=gmt_create
         self.incrementType=incrementType
         self.etlIncreamData=etlIncreamData
+        self.tableSubName=tableSubName
 
     
     def  __str__(self):
