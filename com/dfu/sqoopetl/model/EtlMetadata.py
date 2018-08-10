@@ -6,6 +6,8 @@ Created on 2018年7月19日
 @summary: 使用sqoop etl工具
 '''
 
+'''
+'''
 class EtlDB:
     def __init__(self,dbName,dbHost,dbPort,userName,password,enable=1,gmt_modify=None,gmt_create=None):
         self.id=id;
@@ -67,6 +69,17 @@ class AppInfo:
         self.etlLogPath=etlLogPath
         self.newDataTempDir=newDataTempDir
         self.namenodeUrl=namenodeUrl
+        
+        
+class UDFConf:
+        def __init__(self,sid,funName,packageName,jarName,hdfsPath,namenodeUrl,hiveDBNames):
+            self.sid=sid;
+            self.funName=funName
+            self.packageName=packageName
+            self.jarName=jarName
+            self.hdfsPath=hdfsPath
+            self.namenodeUrl=namenodeUrl
+            self.hiveDBNames=hiveDBNames
 
     
         

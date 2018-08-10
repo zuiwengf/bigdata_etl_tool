@@ -5,11 +5,6 @@ Created on 2018年7月17日
 @author: zuiweng
 @summary: 使用sqoop etl工具
 '''
-
-'''
-sqoop表导入hive的工具
-'''
-
 import ConfigParser
 import datetime
 import logging
@@ -22,11 +17,17 @@ import sys
 import time
 import traceback
 
-from com.dfu.sqoopetl.model.DBTableInfo import ETLTable
-from com.dfu.sqoopetl.model.EtlMetadata import EtlDB, EtlTableTemplate, AppInfo
-from com.dfu.sqoopetl.utils.DBHelper import DBHelper
+from com.xcom.dfupetl.model.DBTableInfo import ETLTable
+from com.xcom.dfupetl.model.EtlMetadata import EtlDB, EtlTableTemplate, AppInfo, \
+    UDFConf
+from com.xcom.dfupetl.utils.DBHelper import DBHelper
 
 
+
+
+'''
+sqoop表导入hive的工具
+'''
 class SqoopEtlTool(object):
     
     '''
@@ -40,19 +41,34 @@ class SqoopEtlTool(object):
         os.system("rm -rf "+self.currPath)
         os.system("mkdir -p  "+self.currPath)
         
-
         self.realEtlTableList.sort(lambda a,b:b.torder-a.torder)
         self.splitTableDict={}
         
         if SqoopEtlTool.str2Bool(self.dropAllTable) :
+            #AppInfo
+            namenodeUrl=self.appInfo.namenodeUrl;
             for k,tableTemplate in self.tableTemplateDict.items():
                 ##EtlTableTemplate
                 dbName=tableTemplate.dbName
                 baseTableName="ods_"+dbName+"."+tableTemplate.tableName
+                
         
                 tempTableNameList=[baseTableName,baseTableName+"_daily_incr"]
                 for tableName in tempTableNameList:
-                    self.system(r''' hive -e  "  drop table IF  EXISTS  %s  " ''' % tableName,None,0) 
+                    self.system(r''' hive -e  "  drop table IF  EXISTS  %s  " ''' % tableName,None,0)
+               
+                tempDNName="ods_"+dbName+".db"
+                tempTableNameList=[tableTemplate.tableName,tableTemplate.tableName+"_daily_incr"]
+                for tableName in tempTableNameList:
+                    dict={
+                        "namenodeUrl":namenodeUrl,
+                        "tempDNName":tempDNName,
+                        "tableName":tableName
+                        }
+                    tablePath=r''' hadoop fs -rm -r  {0[namenodeUrl]}/user/hive/warehouse/{0[tempDNName]}/{0[tableName]}'''.format(dict)
+                    self.system(tablePath,None,0)
+                    tablePath=r''' hadoop fs -rmdir   {0[namenodeUrl]}/user/hive/warehouse/{0[tempDNName]}/{0[tableName]}'''.format(dict)
+                    self.system(tablePath,None,0)   
             
         
         #遍历循环所有的表
@@ -63,7 +79,7 @@ class SqoopEtlTool(object):
                     try:
                         self.exeCreateTable(tableTemplate)
                     except Exception as e:
-                        logging.error(r'exeCreateTable 出现问题: '+str(e))
+                        logging.error(r"exeCreateTable 出现问题: %s     %s " % (tableTemplate.tableName,str(e)))
                         traceback.print_exc()
                         
                     currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
@@ -79,51 +95,49 @@ class SqoopEtlTool(object):
                     try:
                         self.extractAllData(tableInfo,False)
                     except Exception as e:
-                        logging.error(r'exeSqoop 出现问题: '+str(e))
+                        logging.error(r'extractAllData 出现问题: '+str(e))
                         traceback.print_exc()
                 else:
                     try:
                         self.extractAllData(tableInfo,True)
                     except Exception as e:
-                        logging.error(r'exeSqoop 出现问题: '+str(e))
+                        logging.error(r'extractAllData 出现问题: '+str(e))
                         traceback.print_exc()
                 
                 currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
                 os.system("rm -rf  %s/*.java" % currentPath) 
                     
 
-        #增量导入到临时表              ETLTable  
+        #增量导入             ETLTable  
         for tableInfo in self.realEtlTableList:
             if tableInfo.etlIncreamData==1:
-                incrementCol=tableInfo.incrementCol
-                useTimeInc=True
-                if incrementCol is not None :
-                    index=incrementCol.lower().find("id")
-                    if index >= 0:
-                        useTimeInc=False
-                    
-                #如果时间增加列
-                if useTimeInc:
+                if tableInfo.isMutTable==1 and tableInfo.incrementType==1:
                     try:
                         self.extractIncrementData(tableInfo)
                     except Exception as e:
-                        logging.error(r'extractIncrementData or mergeTempData2RealTable 出现问题: '+str(e))
+                        logging.error(r'extractIncrementData  出现问题: '+str(e))
                         traceback.print_exc()
-                else:
-                    pass
+                else :
+                    try:
+                        self.extractAllData(tableInfo,True)
+                    except Exception as e:
+                        logging.error(r'extractAllData 出现问题: '+str(e))
+                        traceback.print_exc()
+                    
                 
                 
                 currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
                 os.system("rm -rf  %s/*.java" % currentPath) 
 
-        #从临时表导入到总表            ，不能和上一段合并代码
-        for tableInfo in self.realEtlTableList:
-            if tableInfo.etlIncreamData==1:
+        #从临时表导入到总表   ，不能和上一段合并代码  EtlTableTemplate。因为他等待所有分表执行完以后才开始
+        for  k,tableTemplate in self.tableTemplateDict.items():
+            if   tableTemplate.etlIncreamData==1 and tableInfo.isMutTable==1  and tableTemplate.incrementType==1:
                 try:
-                    self.mergeTempData2RealTable(tableInfo)
+                    self.mergeTempData2RealTable(tableTemplate)
                 except Exception as e:
-                    logging.error(r' mergeTempData2RealTable 出现问题: '+str(e))
+                    logging.error(r' mergeTempData2RealTable 出现问题:   ==》 '+tableTemplate.tableName+"    "+str(e))
                     traceback.print_exc()
+
             currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
             os.system("rm -rf  %s/*.java" % currentPath)              
                 
@@ -134,7 +148,7 @@ class SqoopEtlTool(object):
                    
                     
 
-    def system(self,cmd,tableInfo,sleepTime=1):
+    def system(self,cmd,tableInfo,sleepTime=1,recLog=1):
 #         time.sleep(1)
         logging.warn(r"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 执行如下命令： ")
         logging.info(cmd)
@@ -145,7 +159,7 @@ class SqoopEtlTool(object):
         os.system(cmd)
         endTime=datetime.datetime.now()
         
-        if  tableInfo  is not None:
+        if  recLog==1 and  tableInfo  is not None:
             self.insertEtlRes(tableInfo,0,0,startTime,endTime,cmd) 
 #         cmdOut = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 #         while True:
@@ -158,12 +172,12 @@ class SqoopEtlTool(object):
     从临时表到总表合并
     '''            
     def mergeTempData2RealTable(self,tableInfo):
-        ####ETLTable
+        ####EtlTableTemplate
         targetDBName="ods_"+tableInfo.dbName+"."
-        allDataTable=targetDBName+tableInfo.targetTableName
+        allDataTable=targetDBName+tableInfo.tableName
         pkeyName=tableInfo.pkeyName
         
-        increaseDataTable=targetDBName+tableInfo.targetTableName+"_daily_incr"
+        increaseDataTable=targetDBName+tableInfo.tableName+"_daily_incr"
         hiveTableDict={
            "allDataTable":allDataTable,
            "increaseDataTable":increaseDataTable,
@@ -171,7 +185,7 @@ class SqoopEtlTool(object):
         }
         hiveCmd=r'''hive -e " insert overwrite    table {0[allDataTable]}    select * from ( select a.* from {0[allDataTable]} as a where a.{0[pkeyName]}  not in ( select  {0[pkeyName]} from {0[increaseDataTable]} ) union all select b.* from {0[increaseDataTable]} as b  ) tmp " '''.format(hiveTableDict)
         logging.info( r" mergeTempData2RealTable: hiveCmd %s" %  hiveCmd)
-    
+        self.system(hiveCmd,tableInfo)
         
         
         
@@ -231,7 +245,7 @@ class SqoopEtlTool(object):
               
         if (queryResult is not None) and rowcount>0 :
             for tableName in tempTableNameList:
-                createTableStr=r''' hive -e  " create EXTERNAL table  IF NOT EXISTS  ''' +tableName+''' ( '''
+                createTableStr=r''' hive -e  " create  table  IF NOT EXISTS  ''' +tableName+''' ( '''
                 index=0
                 maxSize=len(queryResult)
                 for columnInfo in queryResult:
@@ -270,7 +284,6 @@ class SqoopEtlTool(object):
                    
                 createTableStr=createTableStr+r''' ) ROW FORMAT DELIMITED FIELDS TERMINATED BY '\t'  STORED AS TEXTFILE "   '''
                 logging.info( r"exeCreateTable: %s" % createTableStr)
-                
                 self.system(createTableStr,etlTableTemplate)
         
         
@@ -350,7 +363,13 @@ class SqoopEtlTool(object):
         
         now = datetime.datetime.now()
         zeroToday = now - datetime.timedelta(hours=now.hour, minutes=now.minute, seconds=now.second,microseconds=now.microsecond)
-        lastToday = zeroToday - datetime.timedelta(hours=24, minutes=0, seconds=0)
+        
+        dayHours=24*1
+        lastToday = zeroToday - datetime.timedelta(hours=dayHours, minutes=0, seconds=0)
+        
+        
+        strEndTime  = zeroToday.strftime("%Y-%m-%d %H:%M:%S") 
+        strBeginTime = lastToday.strftime("%Y-%m-%d %H:%M:%S") 
         
         ####ETLTable
         whereSQL=" "
@@ -359,10 +378,10 @@ class SqoopEtlTool(object):
         if tableInfo.incrementType==1 :
             whereDict={
                    "incrementCol":tableInfo.incrementCol,
-                   "zeroToday":zeroToday,
-                   "lastToday":lastToday,
+                   "strEndTime":strEndTime,
+                   "strBeginTime":strBeginTime,
                 }
-            whereSQL='''  where {0[incrementCol]} > "{0[lastToday]}" and {0[incrementCol]} <  "{0[zeroToday]}"  and $CONDITIONS '''.format(whereDict)
+            whereSQL='''  where {0[incrementCol]} > "{0[strBeginTime]}" and {0[incrementCol]} <  "{0[strEndTime]}"  and $CONDITIONS '''.format(whereDict)
         
         sqoopDbDict={
                "mysqlConn":connStr,
@@ -436,15 +455,54 @@ class SqoopEtlTool(object):
     @staticmethod            
     def str2Bool(str):
         return True if str.lower() == 'true' else False    
+
+####{0[dbName]}.
+    def registUDF(self,udfConfigList):
+        funSQL=r'''hive -e    " CREATE FUNCTION {0[funName]} as '{0[packageName]}'  USING JAR '{0[namenodeUrl]}{0[hdfsPath]}/{0[jarName]}'   "   '''
+        while(len(udfConfigList)>0):
+            udfConfig=udfConfigList.pop()
+            if udfConfig is not None:
+                #UDFConf   {0[targetDir]}
+                ##CREATE FUNCTION default.userLivingInfo AS 'com.xinniu.recommenation.hive.udf.UserLivingInfoUDF' USING JAR 'hdfs://global-sevice-daily-4:8020/user/hive/userjars/hive-UDF-1.0-SNAPSHOT.jar'; 
+                dbscom.dfu.hiveDBNames.split(",")
+                dict={
+                        ##"dbName":dbName,
+                        "funName":udfConfig.funName,
+                        "packageName":udfConfig.packageName,
+                        "jarName":udfConfig.jarName,
+                        "hdfsPath":udfConfig.hdfsPath,
+                        "namenodeUrl":udfConfig.namenodeUrl
+                    }
+                cmd2=r'''hive -e " DROP FUNCTION IF EXISTS  default.%s  "  '''  %(udfConfig.funName)
+                print (cmd2)
+                cmd=funSQL.format(dict)
+                print (cmd)
+                for dbName in dbs:
+                    dict={
+                        "dbName":dbName,
+                        "funName":udfConfig.funName,
+                        "packageName":udfConfig.packageName,
+                        "jarName":udfConfig.jarName,
+                        "hdfsPath":udfConfig.hdfsPath,
+                        "namenodeUrl":udfConfig.namenodeUrl
+                    }
+#                     cmd=funSQL.format(dict)
+#                     cmd2=r'''hive -e " DROP FUNCTION IF EXISTS  %s.%s  "  '''  %(dbName,udfConfig.funName)
+#                     cmd2=r'''DROP FUNCTION IF EXISTS  %s.%s   ;'''  %(dbName,udfConfig.funName)
+#                     print (cmd2)
+#                     print (cmd2)
+#                     self.system(cmd, None, 0,0)
+                
     
     
     
-    
-    def init(self,conf):
+    def init(self,conf,envName):
         '''
                      初始化配置参数
         '''
         logging.info( r"init etl ......")
+        
+        self.envName=envName
         
         #放置数据库信息
         self.dbDict={}
@@ -458,13 +516,19 @@ class SqoopEtlTool(object):
         
         self.dropAllTable=conf.get("default", "dropAllTable")
         
+        registUDFOnHive=conf.get("default", "registUDFOnHive")
+        
         connInfo=conf.get("default", "db.connInfo")
         infoList=connInfo.strip().split(":")
         configDBInfo=EtlDB(infoList[0],infoList[1],infoList[2],infoList[3],infoList[4])
         
+
+        
         sql="select dbName,dbHost,dbPort,userName,password,enable  from etl_db where enable=1 "
         fetchResult=DBHelper.query(configDBInfo,sql);
         self.configDBInfo=configDBInfo
+        
+        
         
         if fetchResult is not None:
             rowncount=fetchResult[0]
@@ -480,6 +544,32 @@ class SqoopEtlTool(object):
                     enable=dbrow[5]
                     dbInfo=EtlDB(dbName,dbHost,dbPort,userName,password,enable)
                     self.dbDict[dbName]=dbInfo
+            
+            
+            if SqoopEtlTool.str2Bool(registUDFOnHive):
+                    udfConfigList=[]
+                    sql="select id,funName,packageName,jarName,hdfsPath,namenodeUrl,hiveDBNames  from udf_conf where enable=1 and needReg=1"
+                    fetchResult=DBHelper.query(configDBInfo,sql);
+                    if fetchResult is not None:
+                        rowncount=fetchResult[0]
+                        udfConfList=fetchResult[1]
+    
+                        if rowncount>0 and udfConfList is not None:
+                            for dbrow in udfConfList:
+                                sid=dbrow[0]
+                                funName=dbrow[1]
+                                packageName=dbrow[2]
+                                jarName=dbrow[3]
+                                hdfsPath=dbrow[4]
+                                namenodeUrl=dbrow[5]
+                                hiveDBNames=dbrow[6]
+                                udfConfig=UDFConf(sid,funName,packageName,jarName,hdfsPath,namenodeUrl,hiveDBNames)
+                                udfConfigList.append(udfConfig)
+                    if len(udfConfigList)>0:
+                        self.registUDF(udfConfigList);
+                        logging.warn("CREATE  udf FUNCTION finish!!!")
+                    sys.exit(0)
+                        
                     
         
         sql='''select a.id, a.tableName, a.isMutTable, a.mergeCol, a.incrementCol, 
@@ -517,11 +607,9 @@ class SqoopEtlTool(object):
                     self.tableTemplateDict[tableName]=tempTable
                     
         
-        envName=conf.get("default", "envName")
-        if envName not in "dev,test,production":
-            envName="dev"
+        
         logging.info( r"当前环境为:  %s" % envName)
-        sql="select id,etlLogPath,newDataTempDir,namenodeUrl   from app_config  where envName='%s' limit 1 "  % envName
+        sql="select id,etlLogPath,newDataTempDir,namenodeUrl   from app_config  where envName='%s' limit 1 "  % self.envName
         fetchResult=DBHelper.query(configDBInfo,sql);
         
         if fetchResult is not None:
@@ -572,12 +660,13 @@ if __name__ == '__main__':
     currentPath=os.path.abspath(os.path.join(os.getcwd(), "."))
     os.system("rm -rf  %s/*.java" % currentPath)
     parser = OptionParser(usage="%prog -f server.list -u root ...  versrion 1",version="%prog 1")
-    parser.add_option("-e", "--etlType",action="store",dest="etlType",help="etlType: all数据 全量导入 , increment 增量导入。默认值为全量导入",default="all")
-    parser.add_option("-t", "--tables",action="store", dest="tables",help="操作的数据表名列表使用,符号分开，比如table1,table2,table3。默认值为空，即所有表操作",default="")
+    parser.add_option("-e", "--envName",action="store",dest="envName",help="环境是测试还是线上：dev,test,production",default="all")
     (options, args) = parser.parse_args()
     
+    envName=options.envName
+    logging.info("当前配置环境为envName==>  "+envName)
     sys.path.append(currentPath)
-    conFile="./conf/app.conf"
+    conFile="./conf/app-"+envName+".conf"
     conf = ConfigParser.SafeConfigParser()
     conf.read(conFile)
     etlPathStr=conf.get("default", "etlToolEnv.path")
@@ -602,11 +691,14 @@ if __name__ == '__main__':
             print  path
     
 
+
+
+  
     
     reload(sys)     
     sys.setdefaultencoding('utf-8')
     etl=SqoopEtlTool()
-    etl.init(conf)
+    etl.init(conf,envName)
     etl.startFetchTables()
     etl.startEtl()
     etl.endFetch()
