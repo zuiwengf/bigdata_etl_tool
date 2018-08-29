@@ -34,9 +34,9 @@ CREATE TABLE `app_config` (
 -- ----------------------------
 -- Records of app_config
 -- ----------------------------
-INSERT INTO `app_config` VALUES ('1', 'd:/mytest', '/xxxx/xxxx', 'hdfs://global-sevice-daily-4:8020', 'dev', '2018-07-19 15:49:32', '2018-07-19 15:49:36');
-INSERT INTO `app_config` VALUES ('2', '/tmp/OdsSqoopTool', '/xxxx/xxxx', 'hdfs://global-sevice-daily-4:8020', 'test', '2018-07-20 12:21:59', '2018-07-20 12:22:01');
-INSERT INTO `app_config` VALUES ('3', '/data/etlmetadata/logs', '/data/etlmetadata/logs', 'hdfs://public-namenode02:8020', 'production', '2018-07-20 12:22:04', '2018-07-20 12:22:06');
+INSERT INTO `app_config` VALUES ('1', 'd:/mytest', '/xxxx/xxxx', 'hdfs://global-sevice-daily-xxxxxxxxxxxx5:8020', 'dev', '2018-07-19 15:49:32', '2018-07-19 15:49:36');
+INSERT INTO `app_config` VALUES ('2', '/tmp/OdsSqoopTool', '/xxxx/xxxx', 'hdfs://global-sevice-daily-xxxxxxxxxxxxxxxx5:8020', 'test', '2018-07-20 12:21:59', '2018-07-20 12:22:01');
+INSERT INTO `app_config` VALUES ('3', '/data/etlmetadata/logs', '/data/etlmetadata/logs', 'hdfs://public-namenode05-xxxxxxxx:8020', 'production', '2018-07-20 12:22:04', '2018-07-20 12:22:06');
 
 -- ----------------------------
 -- Table structure for etl_db
