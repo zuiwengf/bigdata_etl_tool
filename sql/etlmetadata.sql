@@ -60,10 +60,7 @@ CREATE TABLE `etl_db` (
 -- ----------------------------
 -- Records of etl_db
 -- ----------------------------
-INSERT INTO `etl_db` VALUES ('2', 'zhengxinv6', '192.168.0.52', '3306', 'cspuser', 'cspuser@2017', '2018-07-19 15:51:53', '2018-07-19 15:51:53', '1', '100');
-INSERT INTO `etl_db` VALUES ('3', 'csldata', '192.168.0.52', '3306', 'csldata', 'csldata@2017', '2018-07-19 15:52:28', '2018-07-19 15:52:28', '1', '100');
-INSERT INTO `etl_db` VALUES ('4', 'csorder', '192.168.0.52', '3306', 'csorder', 'csorder@2017', '2018-07-19 15:53:32', '2018-07-19 15:53:32', '1', '100');
-INSERT INTO `etl_db` VALUES ('5', 'basedata', '192.168.0.58', '3306', 'billbase', 'billbase@2017', '2018-07-19 15:54:00', '2018-07-19 15:54:00', '1', '100');
+INSERT INTO `etl_db` VALUES ('2', 'xxxxxxxxxxxxxxdb', '192.168.0.xxxxxx', '3306', 'cspuserxxxxxxxxxxxxxxxxxxxxxxxx', 'cspuserxxxxxxxxxxx@2017', '2018-07-19 15:51:53', '2018-07-19 15:51:53', '1', '100');
 
 -- ----------------------------
 -- Table structure for etl_table_template
